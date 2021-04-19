@@ -1,0 +1,305 @@
+import java.sql.*;
+import java.util.*;
+
+class Kitchen
+{
+    static Connection con;
+    static  HotelCustomer c;
+    public static void main(String[] args) throws SQLException {
+         System.out.println("Welcome to kitchen");
+         System.out.println("The stocks availabe are!!");
+        try {
+            con = DriverManager.getConnection("jdbc:mysql://localhost:3306/mynewschema", "root", "xxxx");
+        } catch (SQLException throwables) {
+            throwables.printStackTrace();
+        }
+        Statement st = con.createStatement();
+        ResultSet  rrs = st.executeQuery("Select * from Kitchen");
+        System.out.printf("%-7s%-42s%-22s\n","Id","Items","Stock");
+        while(rrs.next())
+        {
+            System.out.printf("%-7s%-42s%-22s\n",rrs.getString("item_id"),rrs.getString("item_name"),rrs.getString("stock"));
+
+        }
+    }
+    public void Serve()
+    {
+        ServeThread sst = new ServeThread();
+        Thread t1 = new Thread(sst);
+        t1.start();
+    }
+    public static  void kitchenRequest(int num, HashMap<Integer,Integer> OrderMap,HotelCustomer cr) throws SQLException {
+        c = cr;
+        System.out.println("Table " + num + " Your orders are!!");
+        System.out.println(OrderMap);
+        placeOrder(num,OrderMap);
+
+    }
+    public static void placeOrder(int num,HashMap<Integer,Integer> OrderMap) throws SQLException {
+         Set<Integer> s =  OrderMap.keySet();
+        try {
+            con = DriverManager.getConnection("jdbc:mysql://localhost:3306/mynewschema", "root", "xxxx");
+        } catch (SQLException throwables) {
+            throwables.printStackTrace();
+        }
+        Statement st = con.createStatement();
+        for (Integer i : s) {
+            int key, val;
+            key = i;
+            val = OrderMap.get(i);
+            ResultSet rs = st.executeQuery("select stock from Kitchen where item_id=" + Integer.toString(key));
+            rs.next();
+            int stockval = Integer.parseInt(rs.getString("stock"));
+            //System.out.println(stockval);
+            int newval = stockval - val;
+           int affectedRows = st.executeUpdate("update Kitchen set stock="+ Integer.toString(newval)+" where item_id="+Integer.toString(key));
+          if (affectedRows == 1) {
+                System.out.println(key+" Food-id item status Updated!!");
+            }
+          if(newval==0)
+          {
+              int affectedrows1 =st.executeUpdate("update items_availabe set item_status='NotAvailable' where item_id="+Integer.toString(key));
+          }
+        }
+    }
+    public static HotelCustomer returnObject()
+    {
+        return c;
+    }
+}
+class ServeThread implements Runnable
+{
+    public void run()
+    {
+        try {
+            Thread.sleep(2000);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+        HotelCustomer c =Kitchen.returnObject();
+        synchronized (c)
+        {
+            c.notify();
+            System.out.println("Food ready to table (Notification)!!!!!");
+        }
+    }
+}
+class OrderThread implements Runnable
+{
+    public void run()
+    {
+        HotelCustomer c = new HotelCustomer();
+        int num=0;
+        HashMap<Integer,Integer> OrderMap = new HashMap<>();
+        try {
+           num= c.customerinput(OrderMap);
+        } catch (SQLException throwables) {
+            throwables.printStackTrace();
+        }
+        try {
+            if(num!=0)
+                    Kitchen.kitchenRequest(num,OrderMap,c);
+        } catch (SQLException throwables) {
+            throwables.printStackTrace();
+        }
+        synchronized (c)
+       {
+           try {
+               System.out.println("Pls wait for the food to arrive (wait state)!!");
+               new Kitchen().Serve();
+               c.wait();
+           } catch (InterruptedException e) {
+               e.printStackTrace();
+           }
+       }
+        try {
+            int total_bill=c.billAmount(OrderMap);
+            System.out.println("Your bill amount is!! "+total_bill);
+        } catch (SQLException throwables) {
+            throwables.printStackTrace();
+        }
+
+    }
+}
+public class HotelCustomer
+{
+    static Scanner sc = new Scanner(System.in);
+    static int table_size=21;
+    static int[] table_num = new int[table_size];
+    static Connection con;
+    int billamount;
+    static {
+        try {
+            con = DriverManager.getConnection("jdbc:mysql://localhost:3306/mynewschema", "root", "xxxx");
+        } catch (SQLException throwables) {
+            throwables.printStackTrace();
+        }
+    }
+    public  static void main(String[ ] args) throws InterruptedException, SQLException {
+        System.out.print("Enter the number of customers: ");
+        int custnum=sc.nextInt();
+        if(custnum>table_size)
+        {
+            int extra = custnum-table_size;
+            System.out.println("Parceling will be provided for extra people");
+            new HotelCustomer().parcel(extra);// here another thread can be started to run simultaneously
+        }
+        for(int i=1;i<=custnum;i++) {
+            OrderThread ot = new OrderThread();
+            Thread t1 = new Thread(ot);
+            t1.start();
+            t1.join();
+        }
+
+
+    }
+    public  int customerinput(HashMap<Integer,Integer> orderMap) throws SQLException
+    {
+        Statement st = con.createStatement();
+        System.out.println("\nWelcome to our hotel!!!");
+        System.out.println("Select the table from the available tables");
+        for(int i=1;i<=20;i++) {
+            if(table_num[i]==0)
+                System.out.print(i + " ");
+        }
+        System.out.println();int num=sc.nextInt();
+        while(table_num[num]==1)
+        {
+            System.out.println("Pls enter the vaild table number which is not occupied by anyone!!");
+            num=sc.nextInt();
+        }
+        table_num[num]=1;
+        System.out.println("List of items available");
+        ResultSet s = st.executeQuery("select * from items_availabe order by item_id");
+        System.out.printf("%-7s%-42s%-27s%-22s\n","Id","Items","Price","Status");
+        while (s.next()) {
+            System.out.printf("%-7s%-42sRS.%-22s%-22s\n",s.getString("item_id"),s.getString("item_name"),
+                    s.getString("item_price"),s.getString("item_status"));
+        }
+        System.out.println("select the item id and number of orders in it!!!");
+        while(true) {
+            int id = sc.nextInt();
+            int orderSize = sc.nextInt();
+            int oStock=orderCheck(id, orderSize);
+            if (oStock>=orderSize)
+            {
+                  updateOrder(id,orderSize,orderMap);
+            }
+            else
+            {
+                if(oStock>=1){
+                        System.out.println(id+" is not available with the Quantity you provided!! "+"Please" +
+                        " enter the quantity within "+
+                        oStock);
+                continue;}
+                else
+                {
+                    System.out.println("Your order is not availabe pls enter some other order!!");
+                    continue;
+                }
+            }
+            System.out.println("To submit press Y else any other key");
+            String s1=sc.next();
+            if(s1.equalsIgnoreCase("y"))
+                return num;
+            else
+                System.out.println("select the item id and number of orders in it!!!");
+
+        }
+    }
+    public void updateOrder(int id, int orderSize,HashMap<Integer,Integer> orderMap)
+    {
+        int add=0;
+        if(orderMap.containsKey(id))
+        {
+            add=orderMap.get(id);
+        }
+        orderMap.put(id,orderSize+add);
+
+    }
+    public static int orderCheck(int id, int orderSize) throws SQLException
+    {
+        Statement s1 = con.createStatement();
+        ResultSet s= s1.executeQuery("select stock from Kitchen where item_id="+Integer.toString(id));
+        s.next();
+        return Integer.parseInt(s.getString("Stock"));
+
+    }
+    public  void parcel(int extra) throws SQLException {
+        for(int i=1;i<=extra;i++) {
+            System.out.println("Enter the items for person " + i);
+            HashMap<Integer, Integer> ParcelMap = new HashMap<>();
+            System.out.println("List of items available");
+            Statement st = con.createStatement();
+            ResultSet s = st.executeQuery("select * from items_availabe order by item_id");
+            System.out.printf("%-7s%-42s%-27s%-22s\n", "Id", "Items", "Price", "Status");
+            while (s.next()) {
+                System.out.printf("%-7s%-42sRS.%-22s%-22s\n", s.getString("item_id"), s.getString("item_name"),
+                        s.getString("item_price"), s.getString("item_status"));
+            }
+            System.out.println("select the item id and number of orders in it!!!");
+            while (true) {
+                int id = sc.nextInt();
+                int orderSize = sc.nextInt();
+                int oStock = orderCheck(id, orderSize);
+                if (oStock >= orderSize) {
+                    updateOrder(id, orderSize, ParcelMap);
+                } else {
+                    if (oStock >= 1) {
+                        System.out.println(id + " is not available with the Quantity you provided!! " + "Please" +
+                                " enter the quantity within " +
+                                oStock);
+                        continue;
+                    } else {
+                        System.out.println("Your order is not availabe pls enter some other order!!");
+                        continue;
+                    }
+                }
+                System.out.println("To submit press Y else any other key");
+                String s1 = sc.next();
+                if (s1.equalsIgnoreCase("y"))
+                    break;
+                else
+                    System.out.println("select the item id and number of orders in it!!!");
+
+
+            }
+            HotelCustomer cc = new HotelCustomer();
+            try {
+                    Kitchen.kitchenRequest(i, ParcelMap,cc);
+            } catch (SQLException throwables) {
+                throwables.printStackTrace();
+            }
+            synchronized (cc) {
+                try {
+                    System.out.println("Pls wait for the food to arrive (wait state)!!");
+                    new Kitchen().Serve();
+                    cc.wait();
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+            int total_bill= billAmount(ParcelMap);
+            System.out.println("Your bill amount is!! "+total_bill);
+
+        }
+    }
+    public int billAmount(HashMap<Integer,Integer> OrderMap) throws SQLException
+    {
+        Statement st = con.createStatement();
+        int totalbillamount=0;
+        Set <Integer>s = OrderMap.keySet();
+        for (Integer i : s) {
+            int key, val;
+            key = i;
+            val = OrderMap.get(i);
+            ResultSet rs = st.executeQuery("select item_price from items_availabe where item_id=" + Integer.toString(key));
+            rs.next();
+            int amt=Integer.parseInt(rs.getString("item_price"));
+            amt=amt*val;
+            totalbillamount+=amt;
+        }
+        return  totalbillamount;
+    }
+}
+
